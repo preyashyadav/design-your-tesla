@@ -7,6 +7,9 @@ Monorepo with:
 
 ## What’s Implemented
 
+![alt text](image.png)
+
+
 ### Mobile
 
 - `Configurator` screen
