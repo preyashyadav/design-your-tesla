@@ -9,6 +9,8 @@ import {
   listDesigns,
   loginUser,
   registerUser,
+  submitDesign,
+  updateDesign,
 } from './src/api/backend';
 import { FALLBACK_CATALOG_MODEL } from './src/config/catalog';
 import {
@@ -37,6 +39,20 @@ function catalogKeys(catalog: CatalogModel): string[] {
   return catalog.materials.map((item) => item.key);
 }
 
+function findGlassMaterialKey(catalog: CatalogModel): string | null {
+  const byKey = catalog.materials.find((item) => item.key === 'material_3');
+  if (byKey) {
+    return byKey.key;
+  }
+
+  const byName = catalog.materials.find((item) => {
+    const name = item.name.toLowerCase();
+    const detail = (item.detail ?? '').toLowerCase();
+    return name.includes('glass') || detail.includes('glass');
+  });
+  return byName?.key ?? null;
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<AppTab>('CONFIGURATOR');
   const [catalog, setCatalog] = useState<CatalogModel>(FALLBACK_CATALOG_MODEL);
@@ -46,6 +62,8 @@ export default function App() {
     createDefaultDesignState(catalogKeys(FALLBACK_CATALOG_MODEL)),
   );
   const [savedDesigns, setSavedDesigns] = useState<SavedDesign[]>([]);
+  const [selectedDesign, setSelectedDesign] = useState<SavedDesign | null>(null);
+  const [submittingDesignID, setSubmittingDesignID] = useState<string | null>(null);
   const [isHydrating, setIsHydrating] = useState(true);
   const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -63,6 +81,7 @@ export default function App() {
         }
 
         setSavedDesigns(cachedDesigns);
+        setSelectedDesign(cachedDesigns[0] ?? null);
 
         try {
           const remoteCatalog = await fetchCatalogModel();
@@ -89,6 +108,7 @@ export default function App() {
             setAuthToken(storedToken);
             setCurrentUser(profile);
             setSavedDesigns(remoteDesigns);
+            setSelectedDesign(remoteDesigns[0] ?? null);
             await persistSavedDesigns(remoteDesigns);
           }
         } catch {
@@ -97,6 +117,7 @@ export default function App() {
             setAuthToken(null);
             setCurrentUser(null);
             setSavedDesigns([]);
+            setSelectedDesign(null);
           }
         }
       } finally {
@@ -144,6 +165,7 @@ export default function App() {
         });
         const nextSavedDesigns = [saved, ...savedDesigns.filter((item) => item.id !== saved.id)];
         setSavedDesigns(nextSavedDesigns);
+        setSelectedDesign(saved);
         setDataError(null);
         await persistSavedDesigns(nextSavedDesigns);
         return true;
@@ -158,9 +180,60 @@ export default function App() {
   const handleApplyDesign = useCallback(
     (design: SavedDesign) => {
       setDesignState(mergeWithDefaultDesignState(design.materials, catalogKeys(catalog)));
+      setSelectedDesign(design);
       setActiveTab('CONFIGURATOR');
     },
     [catalog],
+  );
+
+  const handleSubmitForApproval = useCallback(
+    async (design: SavedDesign) => {
+      if (!authToken) {
+        setDataError('Please login before submitting designs.');
+        return;
+      }
+
+      setSubmittingDesignID(design.id);
+      try {
+        const glassKey = findGlassMaterialKey(catalog);
+        let designToSubmit = design;
+
+        if (glassKey) {
+          const currentGlass = design.materials[glassKey];
+          if (currentGlass && currentGlass.patternId !== 'NONE') {
+            const patchedMaterials = cloneDesignState(design.materials);
+            patchedMaterials[glassKey] = {
+              ...patchedMaterials[glassKey],
+              patternId: 'NONE',
+            };
+
+            designToSubmit = await updateDesign(authToken, design.id, {
+              materials: patchedMaterials,
+              name: design.name,
+            });
+          }
+        }
+
+        const submitted = await submitDesign(authToken, designToSubmit.id);
+        const nextSavedDesigns = savedDesigns.map((item) =>
+          item.id === submitted.id ? submitted : item,
+        );
+        setSavedDesigns(nextSavedDesigns);
+        if (selectedDesign?.id === submitted.id) {
+          setSelectedDesign(submitted);
+        }
+        if (design.id === selectedDesign?.id) {
+          setDesignState(mergeWithDefaultDesignState(submitted.materials, catalogKeys(catalog)));
+        }
+        setDataError(null);
+        await persistSavedDesigns(nextSavedDesigns);
+      } catch (error) {
+        setDataError(`Submit failed: ${toErrorMessage(error)}`);
+      } finally {
+        setSubmittingDesignID(null);
+      }
+    },
+    [authToken, catalog, savedDesigns, selectedDesign],
   );
 
   const handleLogin = useCallback(async (email: string, password: string) => {
@@ -179,6 +252,7 @@ export default function App() {
       setAuthToken(login.token);
       setCurrentUser(profile);
       setSavedDesigns(remoteDesigns);
+      setSelectedDesign(remoteDesigns[0] ?? null);
       setActiveTab('CONFIGURATOR');
     } catch (error) {
       setAuthError(toErrorMessage(error));
@@ -212,6 +286,7 @@ export default function App() {
     setAuthToken(null);
     setCurrentUser(null);
     setSavedDesigns([]);
+    setSelectedDesign(null);
     setDataError(null);
     setAuthError(null);
     setActiveTab('CONFIGURATOR');
@@ -220,12 +295,21 @@ export default function App() {
 
   const tabContent = useMemo(() => {
     if (activeTab === 'SAVED') {
-      return <SavedDesignsScreen onApplyDesign={handleApplyDesign} savedDesigns={savedDesigns} />;
+      return (
+        <SavedDesignsScreen
+          onApplyDesign={handleApplyDesign}
+          onSubmitDesign={handleSubmitForApproval}
+          savedDesigns={savedDesigns}
+          submittingDesignId={submittingDesignID}
+        />
+      );
     }
 
     return (
       <ConfiguratorScreen
         catalog={catalog}
+        currentDesignReason={selectedDesign?.rejectionReason}
+        currentDesignStatus={selectedDesign?.status}
         designState={designState}
         onResetDesign={handleReset}
         onSaveDesign={handleSaveDesign}
@@ -239,8 +323,12 @@ export default function App() {
     handleApplyDesign,
     handleReset,
     handleSaveDesign,
+    handleSubmitForApproval,
     handleUpdateDesignState,
+    selectedDesign?.rejectionReason,
+    selectedDesign?.status,
     savedDesigns,
+    submittingDesignID,
   ]);
 
   if (isHydrating) {

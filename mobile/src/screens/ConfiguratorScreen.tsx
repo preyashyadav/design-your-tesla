@@ -16,7 +16,13 @@ import { MaterialList } from '../components/MaterialList';
 import { ModelCanvas } from '../components/ModelCanvas';
 import { COLOR_SUGGESTIONS, getDefaultMaterialConfig } from '../config/designDefaults';
 import type { CatalogModel } from '../types/api';
-import type { DesignState, FinishType, MaterialDesignConfig, PatternId } from '../types/design';
+import type {
+  DesignState,
+  DesignStatus,
+  FinishType,
+  MaterialDesignConfig,
+  PatternId,
+} from '../types/design';
 import type { MaterialEntry, MaterialOption } from '../types/material';
 import { applyMaterialDesign } from '../utils/materialDesignApplier';
 
@@ -33,11 +39,42 @@ const MODEL_CREDIT = {
 
 type ConfiguratorScreenProps = {
   catalog: CatalogModel;
+  currentDesignReason?: string;
+  currentDesignStatus?: DesignStatus;
   designState: DesignState;
   onResetDesign: () => void;
   onSaveDesign: (name: string) => Promise<boolean>;
   onUpdateDesignState: (updater: (current: DesignState) => DesignState) => void;
 };
+
+function statusStyle(status: DesignStatus | undefined): {
+  container: { backgroundColor: string; borderColor: string };
+  text: { color: string };
+} {
+  if (status === 'APPROVED') {
+    return {
+      container: { backgroundColor: '#E7F6EC', borderColor: '#8FC9A0' },
+      text: { color: '#1E6A36' },
+    };
+  }
+  if (status === 'SUBMITTED') {
+    return {
+      container: { backgroundColor: '#EEF2FA', borderColor: '#B2C1E0' },
+      text: { color: '#3C527E' },
+    };
+  }
+  if (status === 'REJECTED') {
+    return {
+      container: { backgroundColor: '#FDECEF', borderColor: '#F1A3B0' },
+      text: { color: '#8E1E31' },
+    };
+  }
+
+  return {
+    container: { backgroundColor: '#F3F4F7', borderColor: '#CDD3DE' },
+    text: { color: '#4C5565' },
+  };
+}
 
 function normalizeMaterialKey(materialName: string): string {
   const trimmed = materialName.trim().toLowerCase();
@@ -61,6 +98,8 @@ function getPreferredMaterialKey(catalog: CatalogModel): string | null {
 
 export function ConfiguratorScreen({
   catalog,
+  currentDesignReason,
+  currentDesignStatus,
   designState,
   onResetDesign,
   onSaveDesign,
@@ -77,6 +116,7 @@ export function ConfiguratorScreen({
   const { width } = useWindowDimensions();
 
   const isWideLayout = width >= 900;
+  const statusAppearance = statusStyle(currentDesignStatus);
   const catalogByKey = useMemo(
     () => new Map(catalog.materials.map((item) => [item.key, item])),
     [catalog.materials],
@@ -84,10 +124,16 @@ export function ConfiguratorScreen({
   const catalogKeys = useMemo(() => catalog.materials.map((item) => item.key), [catalog.materials]);
   const finishOptions: FinishType[] =
     catalog.allowedFinishes.length > 0 ? catalog.allowedFinishes : ['GLOSS', 'MATTE'];
-  const patternOptions: PatternId[] =
+  const basePatternOptions: PatternId[] =
     catalog.allowedPatternIds.length > 0
       ? catalog.allowedPatternIds
       : ['NONE', 'PATTERN_1', 'PATTERN_2', 'PATTERN_3'];
+  const selectedPartMeta = selectedPart ? catalogByKey.get(selectedPart) : undefined;
+  const isGlassSelected =
+    selectedPart === 'material_3' ||
+    selectedPartMeta?.name.toLowerCase().includes('glass') ||
+    selectedPartMeta?.detail?.toLowerCase().includes('glass');
+  const patternOptions: PatternId[] = isGlassSelected ? ['NONE'] : basePatternOptions;
 
   useEffect(() => {
     setSelectedPart((current) => {
@@ -190,6 +236,22 @@ export function ConfiguratorScreen({
     return designState[selectedPart] ?? getDefaultMaterialConfig(selectedPart);
   }, [designState, selectedPart]);
 
+  useEffect(() => {
+    if (!selectedPart || !isGlassSelected) {
+      return;
+    }
+    if (selectedConfig.patternId === 'NONE') {
+      return;
+    }
+    onUpdateDesignState((current) => ({
+      ...current,
+      [selectedPart]: {
+        ...(current[selectedPart] ?? getDefaultMaterialConfig(selectedPart)),
+        patternId: 'NONE',
+      },
+    }));
+  }, [isGlassSelected, onUpdateDesignState, selectedConfig.patternId, selectedPart]);
+
   const updateSelectedPart = useCallback(
     (patch: Partial<MaterialDesignConfig>) => {
       if (!selectedPart) {
@@ -238,6 +300,14 @@ export function ConfiguratorScreen({
     <View style={styles.screen}>
       <Text style={styles.title}>Design Your Tesla</Text>
       <Text style={styles.subtitle}>Configurator</Text>
+      <View style={[styles.statusBadge, statusAppearance.container]}>
+        <Text style={[styles.statusBadgeText, statusAppearance.text]}>
+          {currentDesignStatus ?? 'DRAFT'}
+        </Text>
+      </View>
+      {currentDesignStatus === 'REJECTED' && currentDesignReason ? (
+        <Text style={styles.rejectionText}>Rejected: {currentDesignReason}</Text>
+      ) : null}
 
       <View style={[styles.layout, isWideLayout ? styles.layoutWide : styles.layoutStacked]}>
         <View style={styles.viewerCard}>
@@ -495,6 +565,11 @@ const styles = StyleSheet.create({
   resetButton: {
     backgroundColor: '#2B3140',
   },
+  rejectionText: {
+    color: '#9A2034',
+    fontSize: 12,
+    marginTop: -4,
+  },
   screen: {
     flex: 1,
     gap: 10,
@@ -523,6 +598,18 @@ const styles = StyleSheet.create({
     color: '#121722',
     fontSize: 26,
     fontWeight: '700',
+  },
+  statusBadge: {
+    alignSelf: 'flex-start',
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  statusBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.3,
   },
   viewerCard: {
     backgroundColor: '#DDE4EC',

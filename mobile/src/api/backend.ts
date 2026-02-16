@@ -119,3 +119,8 @@ export async function updateDesign(
   const response = await request<DesignRecordDTO>(`/designs/${designID}`, 'PUT', payload, token);
   return toSavedDesign(response);
 }
+
+export async function submitDesign(token: string, designID: string): Promise<SavedDesign> {
+  const response = await request<DesignRecordDTO>(`/designs/${designID}/submit`, 'POST', undefined, token);
+  return toSavedDesign(response);
+}

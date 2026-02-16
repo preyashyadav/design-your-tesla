@@ -1,4 +1,4 @@
-import type { DesignState, FinishType, PatternId, SavedDesign } from './design';
+import type { DesignState, DesignStatus, FinishType, PatternId, SavedDesign } from './design';
 
 export type UserProfile = {
   email: string;
@@ -40,7 +40,9 @@ export type DesignRecordDTO = {
   createdAt: string;
   id: string;
   name: string;
+  rejectionReason?: string;
   selections: DesignState;
+  status: DesignStatus;
   updatedAt: string;
 };
 
@@ -53,12 +55,21 @@ export type ListDesignsResponse = {
   designs: DesignRecordDTO[];
 };
 
+function normalizeStatus(status: string | undefined): DesignStatus {
+  if (status === 'APPROVED' || status === 'SUBMITTED' || status === 'REJECTED') {
+    return status;
+  }
+  return 'DRAFT';
+}
+
 export function toSavedDesign(record: DesignRecordDTO): SavedDesign {
   return {
     createdAt: record.createdAt,
     id: record.id,
     materials: record.selections,
     name: record.name,
+    rejectionReason: record.rejectionReason,
+    status: normalizeStatus(record.status),
     updatedAt: record.updatedAt,
   };
 }

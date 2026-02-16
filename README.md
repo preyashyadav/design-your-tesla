@@ -21,6 +21,19 @@ Monorepo with:
   - `GET /designs`
   - `GET /designs/:id`
   - `PUT /designs/:id`
+  - `POST /designs/:id/submit`
+- Admin workflow (protected by admin secret):
+  - `GET /admin/submissions`
+  - `POST /admin/designs/:id/approve`
+  - `POST /admin/designs/:id/reject` with `{ "reason": "..." }`
+- Design lifecycle status:
+  - `DRAFT`
+  - `SUBMITTED`
+  - `APPROVED`
+  - `REJECTED` (stores rejection reason)
+- Submission validation:
+  - Must include Body_Paint and Glass selections
+  - Glass selection must use `patternId: "NONE"`
 - Per-user data isolation enforced at query/update time.
 - SQLite schema auto-creates tables on startup:
   - `users`
@@ -36,6 +49,9 @@ Monorepo with:
   - material list comes from `GET /catalog/model`
   - finish/pattern options come from catalog
 - Save Design now writes to backend (`POST /designs`)
+- Submit for approval from Saved Designs summary (`POST /designs/:id/submit`)
+- Status badge shown on configurator and saved design cards
+- Rejection reason shown for rejected designs
 - Local cache of fetched designs retained with AsyncStorage
 
 ## Project Structure
@@ -79,6 +95,8 @@ Optional env vars:
 
 - `JWT_SECRET` (recommended in non-dev use)
 - `DB_PATH` (custom SQLite file path)
+- `PORT` (default: `8080`)
+- `ADMIN_SECRET` (used by `/admin/*`, default: `admin-dev-secret`)
 
 Health check:
 
@@ -147,6 +165,27 @@ curl localhost:8080/me -H "Authorization: Bearer <TOKEN>"
 
 ```bash
 curl -X GET localhost:8080/designs -H "Authorization: Bearer <TOKEN>"
+```
+
+5. Submit a design:
+
+```bash
+curl -X POST localhost:8080/designs/<DESIGN_ID>/submit \
+  -H "Authorization: Bearer <TOKEN>"
+```
+
+6. Admin approve/reject:
+
+```bash
+curl localhost:8080/admin/submissions -H "X-Admin-Secret: <ADMIN_SECRET>"
+
+curl -X POST localhost:8080/admin/designs/<DESIGN_ID>/approve \
+  -H "X-Admin-Secret: <ADMIN_SECRET>"
+
+curl -X POST localhost:8080/admin/designs/<DESIGN_ID>/reject \
+  -H "X-Admin-Secret: <ADMIN_SECRET>" \
+  -H "Content-Type: application/json" \
+  -d '{"reason":"Needs glass pattern fix"}'
 ```
 
 ## Tooling
