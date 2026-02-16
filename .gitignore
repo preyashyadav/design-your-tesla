@@ -32,8 +32,10 @@ android/
 
 # Go
 backend/bin/
+backend/backend
 backend/*.out
 backend/coverage.out
+backend/*.db
 *.test
 
 # Local env files

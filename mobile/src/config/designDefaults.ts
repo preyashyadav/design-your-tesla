@@ -1,4 +1,3 @@
-import { MANAGED_MATERIAL_ORDER, type ManagedMaterialKey } from './designer';
 import type { DesignState, MaterialDesignConfig } from '../types/design';
 
 export const COLOR_SUGGESTIONS: string[] = [
@@ -12,7 +11,23 @@ export const COLOR_SUGGESTIONS: string[] = [
   '#E1E6EE',
 ];
 
-const DEFAULT_BY_PART: Record<ManagedMaterialKey, MaterialDesignConfig> = {
+export const DEFAULT_MATERIAL_KEYS: string[] = [
+  'material_1',
+  'material_3',
+  'material_5',
+  'material_6',
+  'material_7',
+  'material_8',
+  'material_9',
+];
+
+const FALLBACK_CONFIG: MaterialDesignConfig = {
+  colorHex: '#111317',
+  finish: 'GLOSS',
+  patternId: 'NONE',
+};
+
+const DEFAULT_BY_PART: Record<string, MaterialDesignConfig> = {
   material_1: {
     colorHex: '#8D1723',
     finish: 'MATTE',
@@ -50,22 +65,31 @@ const DEFAULT_BY_PART: Record<ManagedMaterialKey, MaterialDesignConfig> = {
   },
 };
 
-export function createDefaultDesignState(): DesignState {
-  return MANAGED_MATERIAL_ORDER.reduce<DesignState>((acc, key) => {
-    const source = DEFAULT_BY_PART[key];
-    acc[key] = {
-      colorHex: source.colorHex,
-      finish: source.finish,
-      patternId: source.patternId,
-    };
-    return acc;
-  }, {} as DesignState);
+export function getDefaultMaterialConfig(materialKey?: string): MaterialDesignConfig {
+  const source = materialKey ? DEFAULT_BY_PART[materialKey] : undefined;
+  const base = source ?? FALLBACK_CONFIG;
+  return {
+    colorHex: base.colorHex,
+    finish: base.finish,
+    patternId: base.patternId,
+  };
 }
 
-export function mergeWithDefaultDesignState(partial: Partial<DesignState>): DesignState {
-  const defaults = createDefaultDesignState();
+export function createDefaultDesignState(materialKeys: string[] = DEFAULT_MATERIAL_KEYS): DesignState {
+  return materialKeys.reduce<DesignState>((acc, key) => {
+    acc[key] = getDefaultMaterialConfig(key);
+    return acc;
+  }, {});
+}
 
-  MANAGED_MATERIAL_ORDER.forEach((key) => {
+export function mergeWithDefaultDesignState(
+  partial: Partial<DesignState>,
+  materialKeys?: string[],
+): DesignState {
+  const keys = materialKeys && materialKeys.length > 0 ? materialKeys : Object.keys(partial);
+  const defaults = createDefaultDesignState(keys.length > 0 ? keys : DEFAULT_MATERIAL_KEYS);
+
+  keys.forEach((key) => {
     const incoming = partial[key];
     if (!incoming) {
       return;
@@ -82,13 +106,12 @@ export function mergeWithDefaultDesignState(partial: Partial<DesignState>): Desi
 }
 
 export function cloneDesignState(state: DesignState): DesignState {
-  return MANAGED_MATERIAL_ORDER.reduce<DesignState>((acc, key) => {
-    const value = state[key];
+  return Object.entries(state).reduce<DesignState>((acc, [key, value]) => {
     acc[key] = {
       colorHex: value.colorHex,
       finish: value.finish,
       patternId: value.patternId,
     };
     return acc;
-  }, {} as DesignState);
+  }, {});
 }

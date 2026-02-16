@@ -7,7 +7,6 @@ import {
   SRGBColorSpace,
   UnsignedByteType,
 } from 'three';
-import type { ManagedMaterialKey } from '../config/designer';
 import type { FinishType, MaterialDesignConfig, PatternId } from '../types/design';
 import { materialHasColor, normalizeHex } from './materials';
 
@@ -89,12 +88,13 @@ function disableUnsupportedTransmission(material: StylableMaterial): void {
 
 function applyFinish(
   material: StylableMaterial,
-  key: ManagedMaterialKey,
+  key: string,
   finish: FinishType,
 ): void {
   const isGloss = finish === 'GLOSS';
-  const isTire = key === 'material_8';
-  const isGlass = key === 'material_3';
+  const normalizedKey = key.toLowerCase();
+  const isTire = normalizedKey === 'material_8' || normalizedKey.includes('tire');
+  const isGlass = normalizedKey === 'material_3' || normalizedKey.includes('glass');
 
   if (isGlass) {
     material.transparent = true;
@@ -118,7 +118,7 @@ function applyFinish(
 
 export function applyMaterialDesign(
   material: Material,
-  key: ManagedMaterialKey,
+  key: string,
   config: MaterialDesignConfig,
 ): void {
   const stylable = material as StylableMaterial;

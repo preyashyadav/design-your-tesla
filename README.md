@@ -3,37 +3,40 @@
 Monorepo with:
 
 - `mobile/`: Expo React Native + TypeScript configurator app
-- `backend/`: Go API
+- `backend/`: Go API with JWT auth + SQLite design storage
 
-## What’s Implemented
+## Implemented Features
 
-![alt text](image.png)
+### Backend (`backend/`)
 
+- `GET /health` -> `{ "ok": true }`
+- Auth:
+  - `POST /auth/register` `{ email, password }`
+  - `POST /auth/login` `{ email, password }` -> `{ token }`
+  - `GET /me` (Bearer token required)
+- Catalog:
+  - `GET /catalog/model` (public)
+- Designs (Bearer token required):
+  - `POST /designs`
+  - `GET /designs`
+  - `GET /designs/:id`
+  - `PUT /designs/:id`
+- Per-user data isolation enforced at query/update time.
+- SQLite schema auto-creates tables on startup:
+  - `users`
+  - `designs`
 
-### Mobile
+### Mobile (`mobile/`)
 
-- `Configurator` screen
-  - Interactive 3D model viewer
-  - Select parts/materials
-  - Edit per-part:
-    - `colorHex`
-    - `finish` (`GLOSS` / `MATTE`)
-    - `patternId` (`NONE`, `PATTERN_1`, `PATTERN_2`, `PATTERN_3`)
-  - Real-time updates on the 3D model
-  - Save named design
-  - Reset to defaults
-- `Saved Designs` screen
-  - Lists local designs with name + timestamp
-  - Tap to apply saved design
-- Local persistence with AsyncStorage (survives app restarts)
-
-### Backend
-
-- `GET /health` returns:
-
-```json
-{ "ok": true }
-```
+- Login/Register screen
+- Secure JWT persistence with `expo-secure-store` (fallback cache in AsyncStorage)
+- Configurator screen with live 3D editing
+- Saved Designs screen sourced from backend
+- Catalog-driven materials/options:
+  - material list comes from `GET /catalog/model`
+  - finish/pattern options come from catalog
+- Save Design now writes to backend (`POST /designs`)
+- Local cache of fetched designs retained with AsyncStorage
 
 ## Project Structure
 
@@ -41,6 +44,7 @@ Monorepo with:
 .
 ├── backend
 │   ├── go.mod
+│   ├── go.sum
 │   ├── main.go
 │   └── Makefile
 ├── mobile
@@ -55,17 +59,9 @@ Monorepo with:
 
 ## Prerequisites
 
-- Node.js 20 or 22 recommended
+- Node.js 20 or 22 recommended (`>=18 <25` supported by this app)
 - npm
 - Go 1.22+
-
-## Run Mobile
-
-```bash
-cd mobile
-npm install
-npx expo start
-```
 
 ## Run Backend
 
@@ -73,6 +69,16 @@ npx expo start
 cd backend
 go run .
 ```
+
+By default:
+
+- server runs on `http://localhost:8080`
+- SQLite DB file is `backend/design_your_tesla.db`
+
+Optional env vars:
+
+- `JWT_SECRET` (recommended in non-dev use)
+- `DB_PATH` (custom SQLite file path)
 
 Health check:
 
@@ -83,44 +89,83 @@ curl localhost:8080/health
 Expected:
 
 ```json
-{"ok": true}
+{"ok":true}
 ```
 
-## Mobile Tooling
+## Run Mobile
+
+```bash
+cd mobile
+npm install
+npx expo start
+```
+
+## Configure Mobile -> Backend Base URL
+
+The mobile app reads API base URL from `EXPO_PUBLIC_API_BASE_URL`.
+
+Examples:
+
+```bash
+# iOS simulator / web
+EXPO_PUBLIC_API_BASE_URL=http://localhost:8080 npx expo start
+
+# Android emulator
+EXPO_PUBLIC_API_BASE_URL=http://10.0.2.2:8080 npx expo start
+```
+
+If not set, the app defaults to:
+
+- Android: `http://10.0.2.2:8080`
+- Others: `http://localhost:8080`
+
+## Acceptance Flow (Manual)
+
+1. Register user:
+
+```bash
+curl -X POST localhost:8080/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email":"user1@example.com","password":"password123"}'
+```
+
+2. Login:
+
+```bash
+curl -X POST localhost:8080/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"user1@example.com","password":"password123"}'
+```
+
+3. Use returned token:
+
+```bash
+curl localhost:8080/me -H "Authorization: Bearer <TOKEN>"
+```
+
+4. Save and list designs from app or with API:
+
+```bash
+curl -X GET localhost:8080/designs -H "Authorization: Bearer <TOKEN>"
+```
+
+## Tooling
+
+### Mobile
 
 ```bash
 cd mobile
 npm run lint
-npm run format:check
+npx tsc --noEmit
 ```
 
-## Backend Tooling
+### Backend
 
 ```bash
 cd backend
-make fmt
+gofmt -w .
+go test ./...
 ```
-
-## Git Push Checklist
-
-```bash
-git add .
-git commit -m "feat: add Tesla configurator with saved local designs and typed material editing"
-git branch -M main
-git remote add origin <YOUR_REPO_URL>   # skip if already set
-git push -u origin main
-```
-
-## Notes
-
-- If Metro cache causes stale errors, run:
-
-```bash
-cd mobile
-npx expo start -c
-```
-
-- On some Expo GL environments, texture logs like `gl.pixelStorei` may appear; they are usually non-fatal.
 
 ## 3D Model Credit
 

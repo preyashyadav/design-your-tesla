@@ -18,7 +18,7 @@ export function SavedDesignsScreen({ onApplyDesign, savedDesigns }: SavedDesigns
   return (
     <View style={styles.screen}>
       <Text style={styles.title}>Saved Designs</Text>
-      <Text style={styles.subtitle}>Locally stored presets on this device</Text>
+      <Text style={styles.subtitle}>Synced designs for your account</Text>
 
       <FlatList
         contentContainerStyle={styles.listContent}

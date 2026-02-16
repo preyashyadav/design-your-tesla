@@ -14,14 +14,8 @@ import {
 import type { Material } from 'three';
 import { MaterialList } from '../components/MaterialList';
 import { ModelCanvas } from '../components/ModelCanvas';
-import { COLOR_SUGGESTIONS } from '../config/designDefaults';
-import {
-  MANAGED_MATERIAL_META,
-  MANAGED_MATERIAL_ORDER,
-  isManagedMaterialKey,
-  toManagedMaterialKey,
-  type ManagedMaterialKey,
-} from '../config/designer';
+import { COLOR_SUGGESTIONS, getDefaultMaterialConfig } from '../config/designDefaults';
+import type { CatalogModel } from '../types/api';
 import type { DesignState, FinishType, MaterialDesignConfig, PatternId } from '../types/design';
 import type { MaterialEntry, MaterialOption } from '../types/material';
 import { applyMaterialDesign } from '../utils/materialDesignApplier';
@@ -37,33 +31,72 @@ const MODEL_CREDIT = {
   title: 'Tesla cybertruk low poly',
 } as const;
 
-const FINISH_OPTIONS: FinishType[] = ['GLOSS', 'MATTE'];
-const PATTERN_OPTIONS: PatternId[] = ['NONE', 'PATTERN_1', 'PATTERN_2', 'PATTERN_3'];
-
 type ConfiguratorScreenProps = {
+  catalog: CatalogModel;
   designState: DesignState;
   onResetDesign: () => void;
-  onSaveDesign: (name: string) => Promise<void>;
+  onSaveDesign: (name: string) => Promise<boolean>;
   onUpdateDesignState: (updater: (current: DesignState) => DesignState) => void;
 };
 
+function normalizeMaterialKey(materialName: string): string {
+  const trimmed = materialName.trim().toLowerCase();
+  const match = trimmed.match(/material[\s_.-]?(\d+)/i);
+  if (!match) {
+    return trimmed;
+  }
+  return `material_${match[1]}`;
+}
+
+function getPreferredMaterialKey(catalog: CatalogModel): string | null {
+  if (catalog.materials.length === 0) {
+    return null;
+  }
+
+  const bodyMaterial =
+    catalog.materials.find((item) => item.key === 'material_9') ??
+    catalog.materials.find((item) => item.name.toLowerCase().includes('body'));
+  return bodyMaterial?.key ?? catalog.materials[0].key;
+}
+
 export function ConfiguratorScreen({
+  catalog,
   designState,
   onResetDesign,
   onSaveDesign,
   onUpdateDesignState,
 }: ConfiguratorScreenProps) {
-  const materialLookupRef = useRef<Partial<Record<ManagedMaterialKey, Material>>>({});
+  const materialLookupRef = useRef<Record<string, Material>>({});
   const [modelUri, setModelUri] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [partOptions, setPartOptions] = useState<MaterialOption[]>([]);
-  const [selectedPart, setSelectedPart] = useState<ManagedMaterialKey>('material_9');
+  const [selectedPart, setSelectedPart] = useState<string | null>(getPreferredMaterialKey(catalog));
   const [saveName, setSaveName] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [bindingsVersion, setBindingsVersion] = useState(0);
   const { width } = useWindowDimensions();
 
   const isWideLayout = width >= 900;
+  const catalogByKey = useMemo(
+    () => new Map(catalog.materials.map((item) => [item.key, item])),
+    [catalog.materials],
+  );
+  const catalogKeys = useMemo(() => catalog.materials.map((item) => item.key), [catalog.materials]);
+  const finishOptions: FinishType[] =
+    catalog.allowedFinishes.length > 0 ? catalog.allowedFinishes : ['GLOSS', 'MATTE'];
+  const patternOptions: PatternId[] =
+    catalog.allowedPatternIds.length > 0
+      ? catalog.allowedPatternIds
+      : ['NONE', 'PATTERN_1', 'PATTERN_2', 'PATTERN_3'];
+
+  useEffect(() => {
+    setSelectedPart((current) => {
+      if (current && catalogByKey.has(current)) {
+        return current;
+      }
+      return getPreferredMaterialKey(catalog);
+    });
+  }, [catalog, catalogByKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -90,40 +123,42 @@ export function ConfiguratorScreen({
   }, []);
 
   const applyCurrentDesignState = useCallback(() => {
-    MANAGED_MATERIAL_ORDER.forEach((partKey) => {
+    catalogKeys.forEach((partKey) => {
       const material = materialLookupRef.current[partKey];
       if (!material) {
         return;
       }
-      applyMaterialDesign(material, partKey, designState[partKey]);
+      const config = designState[partKey] ?? getDefaultMaterialConfig(partKey);
+      applyMaterialDesign(material, partKey, config);
     });
-  }, [designState]);
+  }, [catalogKeys, designState]);
 
   const handleMaterialsExtracted = useCallback(
     (entries: MaterialEntry[]) => {
-      const byPart = new Map<ManagedMaterialKey, MaterialEntry>();
+      const byPart = new Map<string, MaterialEntry>();
+
       entries.forEach((entry) => {
-        const key = toManagedMaterialKey(entry.name);
-        if (!key || byPart.has(key)) {
+        const key = normalizeMaterialKey(entry.name);
+        if (!catalogByKey.has(key) || byPart.has(key)) {
           return;
         }
         byPart.set(key, entry);
       });
 
       const options: MaterialOption[] = [];
-      const nextLookup: Partial<Record<ManagedMaterialKey, Material>> = {};
+      const nextLookup: Record<string, Material> = {};
 
-      MANAGED_MATERIAL_ORDER.forEach((partKey) => {
-        const entry = byPart.get(partKey);
+      catalog.materials.forEach((materialMeta) => {
+        const entry = byPart.get(materialMeta.key);
         if (!entry) {
           return;
         }
 
-        nextLookup[partKey] = entry.material;
+        nextLookup[materialMeta.key] = entry.material;
         options.push({
-          id: partKey,
-          name: MANAGED_MATERIAL_META[partKey].name,
-          detail: MANAGED_MATERIAL_META[partKey].detail,
+          detail: materialMeta.detail,
+          id: materialMeta.key,
+          name: materialMeta.name,
         });
       });
 
@@ -131,11 +166,14 @@ export function ConfiguratorScreen({
       setPartOptions(options);
       setBindingsVersion((value) => value + 1);
 
-      if (!nextLookup[selectedPart] && options[0] && isManagedMaterialKey(options[0].id)) {
-        setSelectedPart(options[0].id);
-      }
+      setSelectedPart((current) => {
+        if (current && nextLookup[current]) {
+          return current;
+        }
+        return options[0]?.id ?? getPreferredMaterialKey(catalog);
+      });
     },
-    [selectedPart],
+    [catalog, catalogByKey],
   );
 
   useEffect(() => {
@@ -145,18 +183,22 @@ export function ConfiguratorScreen({
     applyCurrentDesignState();
   }, [applyCurrentDesignState, bindingsVersion, designState]);
 
-  const selectedConfig = useMemo<MaterialDesignConfig>(
-    () => designState[selectedPart],
-    [designState, selectedPart],
-  );
+  const selectedConfig = useMemo<MaterialDesignConfig>(() => {
+    if (!selectedPart) {
+      return getDefaultMaterialConfig();
+    }
+    return designState[selectedPart] ?? getDefaultMaterialConfig(selectedPart);
+  }, [designState, selectedPart]);
 
   const updateSelectedPart = useCallback(
     (patch: Partial<MaterialDesignConfig>) => {
-      const part = selectedPart;
+      if (!selectedPart) {
+        return;
+      }
       onUpdateDesignState((current) => ({
         ...current,
-        [part]: {
-          ...current[part],
+        [selectedPart]: {
+          ...(current[selectedPart] ?? getDefaultMaterialConfig(selectedPart)),
           ...patch,
         },
       }));
@@ -179,8 +221,10 @@ export function ConfiguratorScreen({
 
     setIsSaving(true);
     try {
-      await onSaveDesign(candidateName);
-      setSaveName('');
+      const saved = await onSaveDesign(candidateName);
+      if (saved) {
+        setSaveName('');
+      }
     } finally {
       setIsSaving(false);
     }
@@ -217,11 +261,7 @@ export function ConfiguratorScreen({
             <Text style={styles.sectionTitle}>Parts</Text>
             <MaterialList
               materials={partOptions}
-              onSelect={(id) => {
-                if (isManagedMaterialKey(id)) {
-                  setSelectedPart(id);
-                }
-              }}
+              onSelect={setSelectedPart}
               selectedMaterialId={selectedPart}
             />
 
@@ -248,7 +288,7 @@ export function ConfiguratorScreen({
 
             <Text style={styles.sectionTitle}>Finish</Text>
             <View style={styles.optionRow}>
-              {FINISH_OPTIONS.map((finish) => {
+              {finishOptions.map((finish) => {
                 const active = selectedConfig.finish === finish;
                 return (
                   <Pressable
@@ -266,7 +306,7 @@ export function ConfiguratorScreen({
 
             <Text style={styles.sectionTitle}>Pattern</Text>
             <View style={styles.optionRow}>
-              {PATTERN_OPTIONS.map((patternId) => {
+              {patternOptions.map((patternId) => {
                 const active = selectedConfig.patternId === patternId;
                 return (
                   <Pressable
@@ -349,9 +389,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
   },
-  disabled: {
-    opacity: 0.45,
-  },
   creditCard: {
     backgroundColor: '#F5F7FA',
     borderColor: '#D8DEE8',
@@ -374,6 +411,9 @@ const styles = StyleSheet.create({
     color: '#3E4A61',
     fontSize: 12,
     lineHeight: 18,
+  },
+  disabled: {
+    opacity: 0.45,
   },
   input: {
     backgroundColor: '#F7F8FA',
@@ -446,7 +486,7 @@ const styles = StyleSheet.create({
     padding: 14,
   },
   panelStacked: {
-    maxHeight: 410,
+    maxHeight: 470,
   },
   panelWide: {
     flex: 0,

@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { mergeWithDefaultDesignState } from '../config/designDefaults';
-import type { SavedDesign } from '../types/design';
+import type { DesignState, SavedDesign } from '../types/design';
 
 const STORAGE_KEY = 'design-your-tesla:saved-designs:v1';
 
@@ -17,6 +17,7 @@ function toSavedDesign(value: unknown): SavedDesign | null {
   const name = value.name;
   const createdAt = value.createdAt;
   const materials = value.materials;
+  const updatedAt = value.updatedAt;
 
   if (
     typeof id !== 'string' ||
@@ -27,11 +28,13 @@ function toSavedDesign(value: unknown): SavedDesign | null {
     return null;
   }
 
+  const normalizedMaterials = mergeWithDefaultDesignState(materials as Partial<DesignState>);
   return {
     createdAt,
     id,
-    materials: mergeWithDefaultDesignState(materials),
+    materials: normalizedMaterials,
     name,
+    updatedAt: typeof updatedAt === 'string' ? updatedAt : undefined,
   };
 }
 
